@@ -43,56 +43,36 @@ public struct SnapPager<Content: View, T: Hashable>: View {
         GeometryReader { geometry in
             ScrollViewReader { scrollProxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    // Use a LazyHStack with a fixed spacing
                     LazyHStack(spacing: itemSpacing) {
-                        ForEach(Array(items.enumerated()), id: \.element) { (index, item) in
+                        ForEach(Array(items.enumerated()), id: \.element) { index, item in
                             content(index, item)
                                 .frame(width: itemWidth)
                                 .id(index)
                         }
                     }
-                    // We use one geometry preference read to get the offset of the entire content.
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(
-                                    key: SnapPagerOffsetPreferenceKey.self,
-                                    value: geo.frame(in: .named("SnapPagerSpace")).origin
-                                )
-                        }
-                    )
-                    .onPreferenceChange(SnapPagerOffsetPreferenceKey.self) { newOffset in
-                        self.scrollOffset = newOffset
-                        if isDragging {
-                            // While dragging, update currentIndex to whichever item is closest to center
-                            let newIndex = calculateCurrentIndex(containerWidth: geometry.size.width)
-                            // Clamp to valid range
-                            let clamped = max(0, min(newIndex, items.count - 1))
-                            currentIndex = clamped
-                            selection = items[clamped]
-                        }
-                    }
                 }
-                // Give the scroll view a named coordinate space
-                .coordinateSpace(name: "SnapPagerSpace")
-                
-                // Use a drag gesture to detect when the user ends dragging, then snap
                 .gesture(
                     DragGesture()
-                        .onChanged { _ in
-                            isDragging = true
-                        }
-                        .onEnded { _ in
-                            isDragging = false
-                            // Once dragging ends, animate to the currentIndex
+                        .onEnded { value in
+                            // Define a threshold for swiping (adjust if needed)
+                            let swipeThreshold: CGFloat = 50
+                            if value.translation.width < -swipeThreshold {
+                                // User swiped left -> go to next item
+                                currentIndex = min(currentIndex + 1, items.count - 1)
+                            } else if value.translation.width > swipeThreshold {
+                                // User swiped right -> go to previous item
+                                currentIndex = max(currentIndex - 1, 0)
+                            }
                             withAnimation {
                                 scrollProxy.scrollTo(currentIndex, anchor: .center)
                             }
                         }
                 )
-                // If currentIndex changes externally, scroll there
-                .onChange(of: currentIndex) { _, newValue in
-                    guard newValue >= 0, newValue < items.count else { return }
+                .onAppear {
+                    // Ensure initial snapping to the current index
+                    scrollProxy.scrollTo(currentIndex, anchor: .center)
+                }
+                .onChange(of: currentIndex) { newValue in
                     withAnimation {
                         scrollProxy.scrollTo(newValue, anchor: .center)
                     }
@@ -100,7 +80,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
             }
         }
     }
-    
+
     // MARK: - Calculate Which Item Is Centered
     private func calculateCurrentIndex(containerWidth: CGFloat) -> Int {
         // The scroll offset is negative, so offsetX = -scrollOffset.x
