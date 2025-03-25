@@ -2,16 +2,19 @@ import SwiftUI
 
 public struct SnapPager<Content: View, T: Hashable>: View {
     
+    // Original bindings
     @Binding var items: [T]
     @Binding var selection: T?
     @Binding var currentIndex: Int
     
+    // Overlap and spacing
     var edgesOverlap: CGFloat = 0
-    /// We’ll store the “gap” in `itemSpacing` internally
     var itemSpacing: CGFloat = 0
     
+    // Content builder
     var content: (Int, T) -> Content
     
+    // Internal states
     @State private var realSelection: T?
     @State private var scrollPosition: CGPoint = .zero
     @State private var isVisible: Bool = false
@@ -20,6 +23,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
     @State private var isScrolling: Bool = false
     @State private var isSelecting: Bool = false
     
+    // MARK: - Init
     public init(
         items: Binding<[T]>,
         selection: Binding<T?>,
@@ -33,7 +37,6 @@ public struct SnapPager<Content: View, T: Hashable>: View {
         self._selection = selection
         self._currentIndex = currentIndex
         self.edgesOverlap = abs(edgesOverlap)
-        // We’ll store the gap as `itemSpacing`
         self.itemSpacing = abs(itemsMargin)
         self.content = content
         self.prefKeyScroller = prefKeyScroller ?? "snapPager"
@@ -43,17 +46,18 @@ public struct SnapPager<Content: View, T: Hashable>: View {
         }
     }
     
+    // MARK: - Body
     public var body: some View {
         GeometryReader { proxy in
             let _ = updateContentSize(proxy.size)
             
             VStack(alignment: .leading) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    // 1) Use `itemSpacing` here instead of fixed 0
+                    // 1) Use LazyHStack(spacing:) for a fixed gap
                     LazyHStack(spacing: itemSpacing) {
                         ForEach(Array(items.enumerated()), id: \.element) { index, item in
                             ZStack {
-                                // 2) Remove `.padding(.horizontal, itemSpacing)`
+                                // 2) Remove horizontal padding so we don’t double-space
                                 content(index, item)
                                     .frame(maxWidth: proxy.size.width - edgesOverlap * 2)
                                     .containerRelativeFrame(.horizontal)
@@ -64,6 +68,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
                         }
                     }
                     .scrollTargetLayout()
+                    // Capture the scroll offset
                     .background(
                         GeometryReader { geometry in
                             Color.clear
@@ -76,13 +81,14 @@ public struct SnapPager<Content: View, T: Hashable>: View {
                         self.readPositionScrollView()
                     }
                 }
+                // If you want the edges overlapped, you can still do safeAreaPadding here:
                 .safeAreaPadding(.horizontal, edgesOverlap)
-                .coordinateSpace(name: prefKeyScroller)
-                .scrollTargetBehavior(.viewAligned)
-                .scrollPosition(id: $realSelection)
+                // For iOS 15 compatibility, remove .scrollTargetBehavior(.viewCentered)
+                // Also remove .scrollPosition(id: $realSelection) for iOS 15
+                
+                // End of scroll view
             }
         }
-        // The rest is unchanged from your original code
         .onChange(of: selection) { _, newValue in
             if !isScrolling {
                 self.isSelecting = true
@@ -94,7 +100,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
                 }
             }
         }
-        .onChange(of: currentIndex) { _, newValue in
+        .onChange(of: currentIndex) { _, _ in
             if currentIndex < items.count, !isSelecting {
                 withAnimation {
                     self.selection = items[currentIndex]
@@ -112,13 +118,14 @@ public struct SnapPager<Content: View, T: Hashable>: View {
         }
     }
     
+    // MARK: - Size Update
     func updateContentSize(_ proxySize: CGSize) {
         DispatchQueue.main.async {
             self.contentSize = proxySize
         }
     }
     
-    /// 3) Incorporate `itemSpacing` in the “slot width”
+    // MARK: - Original Snap Logic
     func readPositionScrollView() {
         let offsetX = -scrollPosition.x
         let margins = edgesOverlap * 2
@@ -128,7 +135,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
             // The center of the visible area
             let visibleCenterX = offsetX + screenContentWidth / 2.0
             
-            // Each “slot” is the item’s width plus the gap
+            // Each “slot” is item width plus the spacing
             let slotWidth = (screenContentWidth - margins) + itemSpacing
             
             // Convert center X to an item index
@@ -145,7 +152,7 @@ public struct SnapPager<Content: View, T: Hashable>: View {
     }
 }
 
-// Same preference key as original
+// MARK: - Preference Key
 struct SnapPagerPreferenceKey: PreferenceKey {
     static var defaultValue: CGPoint = .zero
     static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) {}
