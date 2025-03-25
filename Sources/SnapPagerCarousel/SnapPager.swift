@@ -50,27 +50,16 @@ public struct SnapPager<Content: View, T: Hashable>: View {
                                 .id(index)
                         }
                     }
+                    // Ensure the HStack takes at least the full width of the container.
+                    .frame(minWidth: geometry.size.width)
                 }
-                .gesture(
-                    DragGesture()
-                        .onEnded { value in
-                            // Define a threshold for swiping (adjust if needed)
-                            let swipeThreshold: CGFloat = 50
-                            if value.translation.width < -swipeThreshold {
-                                // User swiped left -> go to next item
-                                currentIndex = min(currentIndex + 1, items.count - 1)
-                            } else if value.translation.width > swipeThreshold {
-                                // User swiped right -> go to previous item
-                                currentIndex = max(currentIndex - 1, 0)
-                            }
-                            withAnimation {
-                                scrollProxy.scrollTo(currentIndex, anchor: .center)
-                            }
-                        }
-                )
+                // This modifier tells the system to snap the closest target to the center.
+                .scrollTargetBehavior(.viewCentered)
                 .onAppear {
-                    // Ensure initial snapping to the current index
-                    scrollProxy.scrollTo(currentIndex, anchor: .center)
+                    // Scroll to the current index when the view appears.
+                    DispatchQueue.main.async {
+                        scrollProxy.scrollTo(currentIndex, anchor: .center)
+                    }
                 }
                 .onChange(of: currentIndex) { newValue in
                     withAnimation {
