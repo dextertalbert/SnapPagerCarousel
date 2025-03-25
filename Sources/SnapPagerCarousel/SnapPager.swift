@@ -1,42 +1,34 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
+// The Swift Programming Language
+// https://docs.swift.org/swift-book
+
 import SwiftUI
 
-
-public struct SnapPager <Content: View, T: Hashable>: View {
+public struct SnapPager<Content: View, T: Hashable>: View {
     
     private let TAG: String = "SnapPager ::"
     
-    
     @Binding var items: [T]
-    
     @Binding var selection: T?
-    
     @Binding var currentIndex: Int
     
-    
+    /// The amount of space to leave at both edges of the pager.
     var edgesOverlap: CGFloat = 0
     
+    /// The fixed space between items. (Previously called itemsMargin.)
     var itemSpacing: CGFloat = 0
     
     var content: (Int, T) -> Content
     
-    
     @State private var realSelection: T?
-    
     @State private var scrollPosition: CGPoint = .zero
-    
     @State private var isVisible: Bool = false
-    
     @State private var contentSize: CGSize = .zero
-    
     @State private var prefKeyScroller: String = "snapPager"
-    
     @State private var isScrolling: Bool = false
-    
     @State private var isSelecting: Bool = false
-    
     
     public init(items: Binding<[T]>,
                 selection: Binding<T?>,
@@ -54,48 +46,36 @@ public struct SnapPager <Content: View, T: Hashable>: View {
         self.content = content
         self.prefKeyScroller = prefKeyScroller ?? "snapPager"
         
-        if selection.wrappedValue != nil
-        {
+        if selection.wrappedValue != nil {
             self.realSelection = selection.wrappedValue!
         }
     }
     
-    
     public var body: some View {
-        
         GeometryReader { proxy in
-            
             let _ = updateContentSize(proxy.size)
             
-            VStack(alignment: .leading)
-            {
-                ScrollView(.horizontal, showsIndicators: false)
-                {
-                    LazyHStack(spacing: 0)
-                    {
+            VStack(alignment: .leading) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    // Set LazyHStack spacing to the fixed value.
+                    LazyHStack(spacing: itemSpacing) {
                         ForEach(Array(items.enumerated()), id: \.element) { index, item in
-
-                            ZStack
-                            {
+                            
+                            ZStack {
+                                // Removed .padding(.horizontal, itemSpacing) so that the fixed spacing comes solely from the LazyHStack.
                                 content(index, item)
-                                    .padding(.horizontal, itemSpacing)
-                                    .frame(maxWidth: proxy.size.width - edgesOverlap*2)
+                                    .frame(maxWidth: proxy.size.width - edgesOverlap * 2)
                                     .containerRelativeFrame(.horizontal)
                             }
                             .id(item)
-                            //.id(index)
                             .clipped()
-                            .frame(width: proxy.size.width - edgesOverlap*2, alignment: .center)
-                            
+                            .frame(width: proxy.size.width - edgesOverlap * 2, alignment: .center)
                         }
-                        
-                        
                     }
                     .scrollTargetLayout()
                     .background(GeometryReader { geometry in
                         Color.clear
                             .preference(key: SnapPagerPreferenceKey.self, value: geometry.frame(in: .named(prefKeyScroller)).origin)
-                        
                     })
                     .onPreferenceChange(SnapPagerPreferenceKey.self) { value in
                         self.scrollPosition = value
@@ -107,104 +87,69 @@ public struct SnapPager <Content: View, T: Hashable>: View {
                 .scrollTargetBehavior(.viewAligned)
                 .scrollPosition(id: $realSelection)
             }
-            
         }
         .onChange(of: selection) { oldValue, newValue in
-            
-            if !isScrolling
-            {
+            if !isScrolling {
                 self.isSelecting = true
-                
                 withAnimation {
                     self.realSelection = newValue
                 }
-                
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) {
                     self.isSelecting = false
                 }
-
             }
-            
         }
         .onChange(of: currentIndex) { oldValue, newValue in
-            
-            if currentIndex < items.count && !isSelecting
-            {
+            if currentIndex < items.count && !isSelecting {
                 withAnimation {
                     self.selection = items[currentIndex]
                 }
             }
-            
         }
         .onAppear {
-            
             self.isVisible = true
-            
-            if currentIndex >= 0 && currentIndex < items.count
-            {
+            if currentIndex >= 0 && currentIndex < items.count {
                 self.selection = items[currentIndex]
             }
         }
         .onDisappear {
             self.isVisible = false
         }
-        
     }
     
-    
-    func updateContentSize(_ proxySize: CGSize)
-    {
+    func updateContentSize(_ proxySize: CGSize) {
         DispatchQueue.main.async {
             self.contentSize = proxySize
         }
     }
-   
-    func readPositionScrollView()
-    {
+    
+    func readPositionScrollView() {
         let scrollPosition = -scrollPosition.x
-        
         let margins = edgesOverlap * 2
-        
         let screenContentWidth = self.contentSize.width
         
-        if isVisible
-        {
-            if screenContentWidth > 0
-            {
+        if isVisible {
+            if screenContentWidth > 0 {
                 // Calculate the center of the visible area
                 let visibleCenterX = scrollPosition + screenContentWidth / 2.0
-                
                 // Calculate the effective item width considering the overlap
                 let effectiveItemWidth = screenContentWidth - margins
-                
                 // Calculate the current index based on the center of the visible area
                 let index = Int(visibleCenterX / effectiveItemWidth)
                 
-            
                 DispatchQueue.main.async {
-                    
                     self.isScrolling = true
-                    
                     self.currentIndex = index
-                    
                     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) {
                         self.isScrolling = false
                     }
-                    
                 }
-                
             }
-            
         }
-        
     }
-    
 }
 
-
-struct SnapPagerPreferenceKey: PreferenceKey
-{
+struct SnapPagerPreferenceKey: PreferenceKey {
     static var defaultValue: CGPoint = .zero
     static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { }
 }
-
