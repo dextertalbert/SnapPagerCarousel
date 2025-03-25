@@ -1,43 +1,34 @@
-// The Swift Programming Language
-// https://docs.swift.org/swift-book
-
 import SwiftUI
 
 public struct SnapPager<Content: View, T: Hashable>: View {
     
-    // The data array and selection bindings
+    // MARK: - Bound Variables
     @Binding var items: [T]
     @Binding var selection: T?
     @Binding var currentIndex: Int
     
-    /// The fixed width of each item/card.
+    // MARK: - Layout Parameters
+    /// The fixed width for each card/item.
     let itemWidth: CGFloat
     
-    /// The fixed space between items.
+    /// The fixed gap between cards.
     let itemSpacing: CGFloat
     
-    /// The content builder for each item.
+    /// Renders each item’s content.
     let content: (Int, T) -> Content
     
-    /// Internal states
-    @State private var realSelection: T?
-    @State private var scrollPosition: CGPoint = .zero
-    @State private var isVisible: Bool = false
-    @State private var isScrolling: Bool = false
-    @State private var isSelecting: Bool = false
+    // MARK: - Internal State
+    @State private var scrollOffset: CGPoint = .zero
+    @State private var isDragging: Bool = false
     
-    /// The coordinate-space name for reading the scroll offset
-    private let prefKeyScroller: String
-    
-    // MARK: - Initializer
+    // MARK: - Init
     public init(
         items: Binding<[T]>,
         selection: Binding<T?>,
         currentIndex: Binding<Int>,
         itemWidth: CGFloat,
         itemSpacing: CGFloat,
-        @ViewBuilder content: @escaping (Int, T) -> Content,
-        coordinateSpaceName: String = "snapPager"
+        @ViewBuilder content: @escaping (Int, T) -> Content
     ) {
         self._items = items
         self._selection = selection
@@ -45,107 +36,92 @@ public struct SnapPager<Content: View, T: Hashable>: View {
         self.itemWidth = itemWidth
         self.itemSpacing = itemSpacing
         self.content = content
-        self.prefKeyScroller = coordinateSpaceName
-        
-        if let selected = selection.wrappedValue {
-            self.realSelection = selected
-        }
     }
     
     // MARK: - Body
     public var body: some View {
-        GeometryReader { proxy in
-            let containerWidth = proxy.size.width
-            
-            VStack(alignment: .leading) {
+        GeometryReader { geometry in
+            ScrollViewReader { scrollProxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    // Use the fixed spacing between items
+                    // Use a LazyHStack with a fixed spacing
                     LazyHStack(spacing: itemSpacing) {
-                        ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                        ForEach(Array(items.enumerated()), id: \.element) { (index, item) in
                             content(index, item)
                                 .frame(width: itemWidth)
-                                .id(item)
+                                .id(index)
                         }
                     }
-                    // Read offset via preference key
+                    // We use one geometry preference read to get the offset of the entire content.
                     .background(
-                        GeometryReader { geometry in
+                        GeometryReader { geo in
                             Color.clear
-                                .preference(key: SnapPagerPreferenceKey.self,
-                                            value: geometry.frame(in: .named(prefKeyScroller)).origin)
+                                .preference(
+                                    key: SnapPagerOffsetPreferenceKey.self,
+                                    value: geo.frame(in: .named("SnapPagerSpace")).origin
+                                )
                         }
                     )
-                    .onPreferenceChange(SnapPagerPreferenceKey.self) { value in
-                        self.scrollPosition = value
-                        self.updateCurrentIndex(containerWidth: containerWidth)
+                    .onPreferenceChange(SnapPagerOffsetPreferenceKey.self) { newOffset in
+                        self.scrollOffset = newOffset
+                        if isDragging {
+                            // While dragging, update currentIndex to whichever item is closest to center
+                            let newIndex = calculateCurrentIndex(containerWidth: geometry.size.width)
+                            // Clamp to valid range
+                            let clamped = max(0, min(newIndex, items.count - 1))
+                            currentIndex = clamped
+                            selection = items[clamped]
+                        }
                     }
                 }
-                .coordinateSpace(name: prefKeyScroller)
-                // SwiftUI 16 feature for snapping:
-                // .scrollTargetBehavior(.viewAligned)
-                // .scrollPosition(id: $realSelection)
+                // Give the scroll view a named coordinate space
+                .coordinateSpace(name: "SnapPagerSpace")
+                
+                // Use a drag gesture to detect when the user ends dragging, then snap
+                .gesture(
+                    DragGesture()
+                        .onChanged { _ in
+                            isDragging = true
+                        }
+                        .onEnded { _ in
+                            isDragging = false
+                            // Once dragging ends, animate to the currentIndex
+                            withAnimation {
+                                scrollProxy.scrollTo(currentIndex, anchor: .center)
+                            }
+                        }
+                )
+                // If currentIndex changes externally, scroll there
+                .onChange(of: currentIndex) { _, newValue in
+                    guard newValue >= 0, newValue < items.count else { return }
+                    withAnimation {
+                        scrollProxy.scrollTo(newValue, anchor: .center)
+                    }
+                }
             }
-        }
-        .onChange(of: selection) { _, newValue in
-            // If something sets selection externally, scroll to it
-            guard !isScrolling else { return }
-            self.isSelecting = true
-            withAnimation {
-                self.realSelection = newValue
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.isSelecting = false
-            }
-        }
-        .onChange(of: currentIndex) { _, _ in
-            // If something sets currentIndex externally, scroll to it
-            guard !isSelecting, currentIndex < items.count else { return }
-            withAnimation {
-                self.selection = items[currentIndex]
-            }
-        }
-        .onAppear {
-            self.isVisible = true
-            if currentIndex >= 0, currentIndex < items.count {
-                self.selection = items[currentIndex]
-            }
-        }
-        .onDisappear {
-            self.isVisible = false
         }
     }
     
-    // MARK: - Helpers
-    
-    /// Update currentIndex based on scroll offset
-    private func updateCurrentIndex(containerWidth: CGFloat) {
-        // The left edge of the scroll view is at negative scrollPosition.x
-        let offsetX = -scrollPosition.x
+    // MARK: - Calculate Which Item Is Centered
+    private func calculateCurrentIndex(containerWidth: CGFloat) -> Int {
+        // The scroll offset is negative, so offsetX = -scrollOffset.x
+        let offsetX = -scrollOffset.x
         
-        // The horizontal center of the viewport
-        let visibleCenterX = offsetX + containerWidth / 2
+        // The center of the visible region
+        let visibleCenterX = offsetX + (containerWidth / 2)
         
-        // Each item occupies `itemWidth + itemSpacing`
-        let itemFullWidth = itemWidth + itemSpacing
+        // Each "slot" is itemWidth + itemSpacing
+        let slotWidth = itemWidth + itemSpacing
         
-        // Determine which item is centered
-        let index = Int(visibleCenterX / itemFullWidth)
+        // Convert the center point to an item index
+        let rawIndex = Int(visibleCenterX / slotWidth)
         
-        guard isVisible, index >= 0, index < items.count else { return }
-        
-        // Throttle quick index changes
-        DispatchQueue.main.async {
-            self.isScrolling = true
-            self.currentIndex = index
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.isScrolling = false
-            }
-        }
+        return rawIndex
     }
 }
 
 // MARK: - Preference Key
-struct SnapPagerPreferenceKey: PreferenceKey {
+/// Holds the offset of the entire scrollable content
+struct SnapPagerOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGPoint = .zero
     static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { }
 }
